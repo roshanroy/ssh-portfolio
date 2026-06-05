@@ -1,18 +1,19 @@
 package sshsessionhandler
 
 import (
-	"os"
-	"io"
+	"encoding/binary"
 	"log"
 	"net"
+	"os"
 	"sync"
+	"ssh-portfolio/tui"
+
 	"golang.org/x/crypto/ssh"
 )
 
-func InitializeSSHConfig(sshHostPrivateKeyPath string) (*ssh.ServerConfig) {
-	
-	
-parsedPrivateSSHKeyBytes, err := os.ReadFile(sshHostPrivateKeyPath)
+func InitializeSSHConfig(sshHostPrivateKeyPath string) *ssh.ServerConfig {
+
+	parsedPrivateSSHKeyBytes, err := os.ReadFile(sshHostPrivateKeyPath)
 	if err != nil {
 		log.Fatal("Failed to read privateKey file: ", err)
 	}
@@ -86,19 +87,28 @@ func HandleConnection(connection net.Conn, sshServerConfig *ssh.ServerConfig) {
 }
 
 func handleSessionChannelRequests(reqResponseChannel ssh.Channel, globalSessionRequests <-chan *ssh.Request) {
+
+	var termWidth, termHeight uint32
 	for request := range globalSessionRequests {
 		switch request.Type {
 		case "shell":
-			request.Reply(true, nil)
-			responseBytesLen, err := io.WriteString(reqResponseChannel, "\r\n Hello World, SSH Portfolio working lessgooooo")
-			go handleUserInput(reqResponseChannel)
-			if err != nil {
-				log.Print("Error writing response to channel:", err)
-			} else {
-				log.Printf("Response Written: %d bytes", responseBytesLen)
+			_, ok := tui.CreateModel("welcomeModel")
+			if !ok {
+				request.Reply(false,nil)
 			}
-		case "pty-req":
-			request.Reply(true, nil) //Temporary as this is the request we have to handle to get our client terminal configurations. This is crucial for our use case.
+			request.Reply(true, nil)
+			
+		case "pty-req":		// This is the request we have to handle to get our client terminal configurations. This is crucial for our use case.
+			var ok bool
+			termWidth, termHeight, ok = parsePtyRequest(request.Payload)
+			if !ok {
+				log.Printf("Received invalid dimensions (%d x %d) within session pty-req!", termWidth, termHeight)
+				request.Reply(false, nil)
+				continue
+			}
+			log.Printf("Dimensions Received: %d x %d", termWidth, termHeight)
+			request.Reply(true, nil)
+
 		default:
 			log.Print("Received unsupported session channel request: ", request.Type)
 			request.Reply(false, nil)
@@ -119,5 +129,38 @@ func handleUserInput(userRequests ssh.Channel) {
 			return
 		}
 	}
+
+}
+
+func parsePtyRequest(payload []byte) (width uint32, height uint32, ok bool) {
+
+	payloadLen := len(payload)
+	if payloadLen < 16 {
+		return 0, 0, false
+	}
+
+	termStringLen := binary.BigEndian.Uint32(payload[0:4])
+	dimensionOffset := termStringLen + 4
+
+	if (dimensionOffset + 16) > uint32(payloadLen) {
+		return 0, 0, false
+	}
+
+	width = binary.BigEndian.Uint32(payload[dimensionOffset : dimensionOffset+4])
+	height = binary.BigEndian.Uint32(payload[dimensionOffset+4 : dimensionOffset+8])
+	if width > 0 && height > 0 {
+		ok = true
+		return
+	}
+
+	dimensionOffset += 8
+	width = binary.BigEndian.Uint32(payload[dimensionOffset : dimensionOffset+4])
+	height = binary.BigEndian.Uint32(payload[dimensionOffset+4 : dimensionOffset+8])
+	if width > 0 && height > 0 {
+		ok = true
+		return
+	}
+
+	return 0, 0, false
 
 }
