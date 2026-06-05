@@ -2,7 +2,6 @@ package tui
 
 import (
 	bbt "charm.land/bubbletea/v2"
-	//intTea "charm.land/bubbletea/v2/tea"
 )
 
 type welcomeModel struct {
@@ -21,13 +20,4 @@ func(w welcomeModel) Update( msg bbt.Msg) (bbt.Model,bbt.Cmd){
 
 func(w welcomeModel) View() bbt.View {
 	return bbt.View{}
-}
-
-
-func CreateModel (modelName string) (bbt.Model,bool) {
-	switch modelName {
-		case "welcomeModel": return welcomeModel{}, true
-	default: return nil,false
-	}
-
 }
